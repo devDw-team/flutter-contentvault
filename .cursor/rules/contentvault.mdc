@@ -1,0 +1,447 @@
+---
+alwaysApply: false
+---
+
+# ContentVault Development Rules
+
+## Project Overview
+ContentVault is a multi-platform content archive app built with Flutter that allows users to save, organize, and search content from various platforms (YouTube, X/Twitter, web articles) with AI-powered organization.
+
+## Tech Stack
+- **Framework**: Flutter 3.16+ (Dart)
+- **State Management**: Riverpod 2.0
+- **Local Database**: Drift (SQLite)
+- **Navigation**: go_router
+- **DI**: get_it
+- **Network**: dio with retrofit
+- **UI Components**: Material 3
+- **Testing**: flutter_test, mockito, integration_test
+
+## Project Structure
+```
+lib/
+├── core/
+│   ├── api/              # API clients and interceptors
+│   ├── database/         # Drift database and DAOs
+│   ├── di/               # Dependency injection
+│   ├── error/            # Error handling
+│   ├── router/           # go_router configuration
+│   ├── theme/            # App theme and colors
+│   └── utils/            # Utilities and helpers
+├── features/
+│   ├── save/             # Content saving feature
+│   │   ├── data/         # Repository implementations
+│   │   ├── domain/       # Entities and repositories
+│   │   ├── presentation/ # UI and controllers
+│   │   └── providers/    # Riverpod providers
+│   ├── search/           # Search feature
+│   ├── viewer/           # Content viewer feature
+│   ├── ai/               # AI processing feature
+│   └── settings/         # Settings feature
+├── shared/
+│   ├── widgets/          # Reusable widgets
+│   ├── extensions/       # Dart extensions
+│   └── constants/        # App constants
+└── main.dart
+
+test/
+├── unit/
+├── widget/
+└── integration/
+```
+
+## Coding Conventions
+
+### 1. File Naming
+- Use lowercase with underscores: `content_card.dart`
+- Test files end with `_test.dart`
+- Models end with `_model.dart`
+- Providers end with `_provider.dart`
+
+### 2. Class Naming
+```dart
+// Widgets
+class ContentCard extends StatelessWidget {}
+
+// Models
+class ContentModel {}
+
+// Providers
+final contentProvider = Provider<Content>((ref) => Content());
+
+// Controllers
+class SearchController extends StateNotifier<SearchState> {}
+```
+
+### 3. Code Style
+```dart
+// Use trailing commas for better formatting
+Widget build(BuildContext context) {
+  return Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surface,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Text(
+      'Content',
+      style: Theme.of(context).textTheme.titleMedium,
+    ),
+  );
+}
+
+// Prefer const constructors
+const EdgeInsets.all(16)
+
+// Use final for immutable variables
+final String title;
+
+// Use meaningful variable names
+final contentList = <Content>[]; // ❌ Bad
+final savedContents = <Content>[]; // ✅ Good
+```
+
+### 4. State Management Rules
+```dart
+// Always use Riverpod providers for state
+final contentListProvider = StateNotifierProvider<ContentListController, AsyncValue<List<Content>>>((ref) {
+  return ContentListController(ref);
+});
+
+// Use AsyncValue for async operations
+class ContentListController extends StateNotifier<AsyncValue<List<Content>>> {
+  ContentListController(this.ref) : super(const AsyncValue.loading());
+  
+  final Ref ref;
+  
+  Future<void> loadContents() async {
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(() async {
+      return await ref.read(contentRepositoryProvider).getContents();
+    });
+  }
+}
+
+// Prefer ref.watch in widgets, ref.read in callbacks
+@override
+Widget build(BuildContext context, WidgetRef ref) {
+  final contents = ref.watch(contentListProvider);
+  
+  return ElevatedButton(
+    onPressed: () => ref.read(contentListProvider.notifier).loadContents(),
+    child: const Text('Load'),
+  );
+}
+```
+
+### 5. Widget Guidelines
+```dart
+// Prefer composition over inheritance
+class ContentCard extends StatelessWidget {
+  const ContentCard({
+    super.key,
+    required this.content,
+    this.onTap,
+  });
+
+  final Content content;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return _CardContainer(
+      child: _CardContent(content: content),
+    );
+  }
+}
+
+// Extract widgets for better readability
+class _CardContainer extends StatelessWidget {
+  const _CardContainer({required this.child});
+  
+  final Widget child;
+  
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+```
+
+### 6. Database Operations
+```dart
+// Use Drift for type-safe database operations
+@DriftDatabase(tables: [Contents, Tags, ContentTags])
+class AppDatabase extends _$AppDatabase {
+  @override
+  int get schemaVersion => 1;
+
+  // Use transactions for multiple operations
+  Future<void> saveContentWithTags(Content content, List<Tag> tags) {
+    return transaction(() async {
+      await into(contents).insert(content);
+      for (final tag in tags) {
+        await into(contentTags).insert(
+          ContentTag(contentId: content.id, tagId: tag.id),
+        );
+      }
+    });
+  }
+}
+
+// Always handle errors in database operations
+Future<List<Content>> getContents() async {
+  try {
+    return await (select(contents)
+      ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+      .get();
+  } catch (e) {
+    throw DatabaseException('Failed to load contents: $e');
+  }
+}
+```
+
+### 7. API Integration
+```dart
+// Use Dio with interceptors
+class ApiClient {
+  late final Dio _dio;
+  
+  ApiClient() {
+    _dio = Dio(BaseOptions(
+      baseUrl: AppConstants.apiBaseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+    ));
+    
+    _dio.interceptors.addAll([
+      LogInterceptor(
+        requestBody: true,
+        responseBody: true,
+      ),
+      AuthInterceptor(),
+      ErrorInterceptor(),
+    ]);
+  }
+}
+
+// Always use try-catch for API calls
+Future<ContentMetadata> fetchMetadata(String url) async {
+  try {
+    final response = await _dio.get('/metadata', queryParameters: {'url': url});
+    return ContentMetadata.fromJson(response.data);
+  } on DioException catch (e) {
+    throw ApiException.fromDioError(e);
+  }
+}
+```
+
+### 8. Error Handling
+```dart
+// Define custom exceptions
+class AppException implements Exception {
+  const AppException(this.message, [this.code]);
+  
+  final String message;
+  final String? code;
+}
+
+// Use Result pattern for error handling
+class Result<T> {
+  const Result.success(this.data) : error = null;
+  const Result.failure(this.error) : data = null;
+  
+  final T? data;
+  final AppException? error;
+  
+  bool get isSuccess => data != null;
+  bool get isFailure => error != null;
+}
+
+// Handle errors gracefully in UI
+Widget build(BuildContext context, WidgetRef ref) {
+  final contentAsync = ref.watch(contentProvider);
+  
+  return contentAsync.when(
+    data: (content) => ContentView(content: content),
+    loading: () => const LoadingIndicator(),
+    error: (error, stack) => ErrorView(
+      message: error.toString(),
+      onRetry: () => ref.refresh(contentProvider),
+    ),
+  );
+}
+```
+
+### 9. Performance Optimization
+```dart
+// Use const constructors whenever possible
+const ContentCard({super.key});
+
+// Implement proper keys for lists
+ListView.builder(
+  itemCount: contents.length,
+  itemBuilder: (context, index) {
+    final content = contents[index];
+    return ContentCard(
+      key: ValueKey(content.id),
+      content: content,
+    );
+  },
+);
+
+// Use lazy loading for heavy widgets
+class LazyContentView extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return const AutomaticKeepAliveClientMixin(
+      child: ContentView(),
+    );
+  }
+}
+
+// Dispose controllers properly
+@override
+void dispose() {
+  _scrollController.dispose();
+  _textController.dispose();
+  super.dispose();
+}
+```
+
+### 10. Testing Requirements
+```dart
+// Unit tests for business logic
+test('ContentParser should extract title correctly', () {
+  final parser = ContentParser();
+  final result = parser.parseTitle('<title>Test Title</title>');
+  expect(result, equals('Test Title'));
+});
+
+// Widget tests for UI components
+testWidgets('ContentCard displays title', (tester) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: ContentCard(
+        content: Content(title: 'Test Title'),
+      ),
+    ),
+  );
+  
+  expect(find.text('Test Title'), findsOneWidget);
+});
+
+// Integration tests for features
+testWidgets('Save content flow works correctly', (tester) async {
+  await tester.pumpWidget(MyApp());
+  
+  // Tap share button
+  await tester.tap(find.byIcon(Icons.share));
+  await tester.pumpAndSettle();
+  
+  // Verify content is saved
+  expect(find.text('Content saved'), findsOneWidget);
+});
+```
+
+## Git Commit Rules
+```bash
+# Format: <type>(<scope>): <subject>
+
+# Types:
+# feat: New feature
+# fix: Bug fix
+# docs: Documentation
+# style: Code style (formatting, etc)
+# refactor: Code refactoring
+# test: Adding tests
+# chore: Maintenance
+
+# Examples:
+feat(save): add YouTube metadata extraction
+fix(search): resolve duplicate results issue
+docs(readme): update installation instructions
+```
+
+## Security Guidelines
+1. Never store API keys in code
+2. Use environment variables for sensitive data
+3. Implement certificate pinning for API calls
+4. Encrypt sensitive local data
+5. Validate and sanitize all user inputs
+6. Use secure storage for auth tokens
+
+## Platform-Specific Code
+```dart
+// Use platform checks sparingly
+if (Platform.isIOS) {
+  // iOS specific code
+} else if (Platform.isAndroid) {
+  // Android specific code
+}
+
+// Prefer using Flutter's built-in platform adaptations
+Switch.adaptive()
+CircularProgressIndicator.adaptive()
+```
+
+## Accessibility Requirements
+```dart
+// Always add semantic labels
+Semantics(
+  label: 'Save ${content.title}',
+  button: true,
+  child: IconButton(
+    icon: const Icon(Icons.bookmark),
+    onPressed: onSave,
+  ),
+);
+
+// Support screen readers
+Text(
+  content.title,
+  semanticsLabel: '${content.title}. ${content.source}. Saved ${content.formattedDate}',
+);
+```
+
+## Localization
+```dart
+// Use app_localizations
+Text(AppLocalizations.of(context)!.saveContent)
+
+// Provide context for translators
+Text(
+  AppLocalizations.of(context)!.itemCount(count),
+  // Translator: Displays number of saved items
+);
+```
+
+## Performance Monitoring
+1. Track app startup time
+2. Monitor memory usage
+3. Profile frame rendering
+4. Measure API response times
+5. Track crash-free rates
+
+## Code Review Checklist
+- [ ] Follows naming conventions
+- [ ] Includes appropriate error handling
+- [ ] Has unit tests (minimum 80% coverage)
+- [ ] Updates documentation
+- [ ] No hardcoded strings
+- [ ] Accessibility features implemented
+- [ ] Performance optimized
+- [ ] Security guidelines followed
