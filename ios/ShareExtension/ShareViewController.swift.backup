@@ -1,0 +1,140 @@
+import UIKit
+import Social
+import MobileCoreServices
+
+class ShareViewController: SLComposeServiceViewController {
+    
+    private let appGroupName = "group.com.sangdae.contentvault.dw002"
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        NSLog("ShareExtension: viewDidLoad called")
+    }
+    
+    override func isContentValid() -> Bool {
+        NSLog("ShareExtension: isContentValid called")
+        // 항상 true를 반환하여 Post 버튼을 활성화
+        return true
+    }
+    
+    override func didSelectPost() {
+        // 사용자가 Post 버튼을 눌렀을 때 실행
+        NSLog("ShareExtension: didSelectPost called")
+        
+        if let item = extensionContext?.inputItems.first as? NSExtensionItem {
+            NSLog("ShareExtension: Found extension item")
+            
+            if let attachments = item.attachments {
+                NSLog("ShareExtension: Found \(attachments.count) attachments")
+                
+                var processed = false
+                
+                for attachment in attachments {
+                    NSLog("ShareExtension: Processing attachment")
+                    
+                    if attachment.hasItemConformingToTypeIdentifier(kUTTypeURL as String) {
+                        NSLog("ShareExtension: Attachment has URL type")
+                        processed = true
+                        
+                        attachment.loadItem(forTypeIdentifier: kUTTypeURL as String, options: nil) { [weak self] (data, error) in
+                            if let error = error {
+                                NSLog("ShareExtension: Error loading URL: \(error)")
+                            }
+                            
+                            if let url = data as? URL {
+                                NSLog("ShareExtension: Got URL object: \(url.absoluteString)")
+                                self?.saveURL(url.absoluteString)
+                            } else if let urlString = data as? String {
+                                NSLog("ShareExtension: Got URL string: \(urlString)")
+                                self?.saveURL(urlString)
+                            } else {
+                                NSLog("ShareExtension: Unknown URL data type: \(type(of: data))")
+                            }
+                        }
+                    } else if attachment.hasItemConformingToTypeIdentifier(kUTTypePlainText as String) {
+                        NSLog("ShareExtension: Attachment has text type")
+                        processed = true
+                        
+                        attachment.loadItem(forTypeIdentifier: kUTTypePlainText as String, options: nil) { [weak self] (data, error) in
+                            if let error = error {
+                                NSLog("ShareExtension: Error loading text: \(error)")
+                            }
+                            
+                            if let text = data as? String {
+                                NSLog("ShareExtension: Got text: \(text)")
+                                self?.saveURL(text)
+                            } else {
+                                NSLog("ShareExtension: Unknown text data type: \(type(of: data))")
+                            }
+                        }
+                    } else {
+                        NSLog("ShareExtension: Attachment has unknown type")
+                    }
+                }
+                
+                if !processed {
+                    NSLog("ShareExtension: No processable attachments found")
+                }
+            }
+        } else {
+            NSLog("ShareExtension: No extension items found")
+        }
+        
+        // Extension 종료
+        self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+    }
+    
+    override func configurationItems() -> [Any]! {
+        // 설정 항목이 필요하면 여기에 추가
+        return []
+    }
+    
+    private func saveURL(_ urlString: String) {
+        NSLog("ShareExtension: saveURL called with: \(urlString)")
+        
+        // UserDefaults에 저장 (receive_sharing_intent 패키지가 읽을 수 있도록)
+        if let userDefaults = UserDefaults(suiteName: appGroupName) {
+            NSLog("ShareExtension: Successfully accessed UserDefaults")
+            
+            var sharedData: [[String: Any]] = userDefaults.object(forKey: "ShareMedia") as? [[String: Any]] ?? []
+            NSLog("ShareExtension: Current ShareMedia count: \(sharedData.count)")
+            
+            let newItem: [String: Any] = [
+                "path": urlString,
+                "type": 0, // text type
+                "thumbnail": NSNull(),
+                "duration": NSNull()
+            ]
+            
+            sharedData.append(newItem)
+            userDefaults.set(sharedData, forKey: "ShareMedia")
+            let syncResult = userDefaults.synchronize()
+            
+            NSLog("ShareExtension: Saved URL to UserDefaults - \(urlString)")
+            NSLog("ShareExtension: Total items in ShareMedia: \(sharedData.count)")
+            NSLog("ShareExtension: Synchronize result: \(syncResult)")
+            
+            // Verify the save
+            if let verifyData = userDefaults.object(forKey: "ShareMedia") as? [[String: Any]] {
+                NSLog("ShareExtension: Verification - ShareMedia now has \(verifyData.count) items")
+            }
+        } else {
+            NSLog("ShareExtension: Failed to access UserDefaults with app group: \(appGroupName)")
+        }
+        
+        // 메인 앱 열기 시도
+        NSLog("ShareExtension: Attempting to open main app")
+        openURL(URL(string: "contentvault://share")!)
+    }
+    
+    @objc func openURL(_ url: URL) -> Bool {
+        var responder: UIResponder? = self
+        while responder != nil {
+            if let application = responder as? UIApplication {
+                return application.perform(#selector(openURL(_:)), with: url) != nil
+            }
+            responder = responder?.next
+        }
+        return false
+    }
+}

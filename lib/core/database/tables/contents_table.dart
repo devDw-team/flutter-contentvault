@@ -7,7 +7,7 @@ class ContentsTable extends Table {
   TextColumn get url => text().unique()();
   TextColumn get description => text().nullable()();
   TextColumn get thumbnailUrl => text().nullable()();
-  TextColumn get contentType => text()(); // 'youtube', 'twitter', 'web', 'article'
+  TextColumn get contentType => text()(); // 'youtube', 'twitter', 'threads', 'web', 'article'
   TextColumn get sourcePlatform => text()();
   TextColumn get author => text().nullable()();
   DateTimeColumn get publishedAt => dateTime().nullable()();

@@ -9,6 +9,7 @@ import '../../features/library/presentation/pages/library_page.dart';
 import '../../features/ai/presentation/pages/ai_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
 import '../../shared/widgets/main_scaffold.dart';
+import '../../test_page.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -60,6 +61,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             ),
           ),
         ],
+      ),
+      // Test route for debugging
+      GoRoute(
+        path: '/test',
+        name: 'test',
+        pageBuilder: (context, state) => const NoTransitionPage(
+          child: TestPage(),
+        ),
       ),
       // TODO: 모달 라우트들 추가 (콘텐츠 상세, 태그 관리 등)
     ],
