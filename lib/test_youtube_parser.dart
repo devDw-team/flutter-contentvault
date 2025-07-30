@@ -13,7 +13,7 @@ void main() async {
   
   if (apiKey == null || apiKey.isEmpty) {
     // 테스트용 임시 키 설정 (실제 API 키로 교체 필요)
-    await prefs.setString('youtube_api_key', 'AIzaSyCACMfpLMII6O0BxuRLXofmEfUi6UHSKcg');
+    await prefs.setString('youtube_api_key', 'YOUR API KEY');
     print('⚠️ YouTube API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력하세요.');
   }
   
