@@ -10,6 +10,10 @@ import '../../features/save/domain/services/background_save_processor.dart';
 import '../../features/save/domain/services/pending_saves_repository.dart';
 import '../../features/save/data/api_clients/youtube_api_client.dart';
 import '../../features/save/data/parsers/youtube_parser.dart';
+import '../../features/save/data/parsers/twitter_parser.dart';
+import '../../features/save/data/parsers/web_parser.dart';
+import '../../features/save/data/parsers/threads_parser.dart';
+import '../../features/search/domain/services/search_engine.dart';
 
 final getIt = GetIt.instance;
 
@@ -41,10 +45,29 @@ Future<void> setupServiceLocator() async {
     ),
   );
   
+  getIt.registerLazySingleton<TwitterParser>(
+    () => TwitterParser(
+      metadataExtractor: getIt<ContentMetadataExtractor>(),
+    ),
+  );
+  
+  getIt.registerLazySingleton<WebParser>(
+    () => WebParser(),
+  );
+  
+  getIt.registerLazySingleton<ThreadsParser>(
+    () => ThreadsParser(
+      metadataExtractor: getIt<ContentMetadataExtractor>(),
+    ),
+  );
+  
   // Platform Parser Selector (depends on parsers)
   getIt.registerLazySingleton<PlatformParserSelector>(
     () => PlatformParserSelector(
       youtubeParser: getIt<YouTubeParser>(),
+      twitterParser: getIt<TwitterParser>(),
+      webParser: getIt<WebParser>(),
+      threadsParser: getIt<ThreadsParser>(),
     ),
   );
   
@@ -65,7 +88,13 @@ Future<void> setupServiceLocator() async {
       urlValidator: getIt<UrlValidator>(),
       platformSelector: getIt<PlatformParserSelector>(),
       pendingSavesRepository: getIt<PendingSavesRepository>(),
+      backgroundQueueProcessor: getIt<BackgroundSaveProcessor>(),
     ),
+  );
+  
+  // Search Engine
+  getIt.registerLazySingleton<SearchEngine>(
+    () => SearchEngine(database: getIt<AppDatabase>()),
   );
   
   // TODO: API clients, repositories 등 추가 등록

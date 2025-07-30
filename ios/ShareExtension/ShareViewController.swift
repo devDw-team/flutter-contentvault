@@ -88,11 +88,21 @@ class ShareViewController: SLComposeServiceViewController {
         if let userDefaults = UserDefaults(suiteName: appGroupName) {
             var sharedData: [[String: Any]] = userDefaults.object(forKey: "ShareMedia") as? [[String: Any]] ?? []
             
+            // Determine content type from URL
+            var contentType = "web"
+            if urlString.contains("threads.net") {
+                contentType = "threads"
+            } else if urlString.contains("twitter.com") || urlString.contains("x.com") {
+                contentType = "twitter"
+            } else if urlString.contains("youtube.com") || urlString.contains("youtu.be") {
+                contentType = "youtube"
+            }
+            
             let newItem: [String: Any] = [
                 "path": urlString,
-                "type": 0,
-                "thumbnail": "",  // Empty string instead of NSNull
-                "duration": 0     // Default value instead of NSNull
+                "type": contentType,  // Use string type instead of integer
+                "thumbnail": "",      // Empty string instead of NSNull
+                "duration": 0         // Default value instead of NSNull
             ]
             
             sharedData.append(newItem)

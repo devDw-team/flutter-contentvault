@@ -1,13 +1,22 @@
 import 'url_validator.dart';
 import '../../data/parsers/youtube_parser.dart';
+import '../../data/parsers/twitter_parser.dart';
+import '../../data/parsers/web_parser.dart';
+import '../../data/parsers/threads_parser.dart';
 import '../../../../core/database/app_database.dart';
 
 class PlatformParserSelector {
   final _urlValidator = UrlValidator();
   final YouTubeParser? youtubeParser;
+  final TwitterParser? twitterParser;
+  final WebParser? webParser;
+  final ThreadsParser? threadsParser;
 
   PlatformParserSelector({
     this.youtubeParser,
+    this.twitterParser,
+    this.webParser,
+    this.threadsParser,
   });
 
   String selectPlatform(String url) {
@@ -34,16 +43,20 @@ class PlatformParserSelector {
         }
         break;
       case 'twitter':
-        // TODO: Implement Twitter parser
+        if (twitterParser != null && twitterParser!.canParse(url)) {
+          return await twitterParser!.parse(url);
+        }
         break;
       case 'threads':
-        // TODO: Implement Threads parser
+        if (threadsParser != null && threadsParser!.canParse(url)) {
+          return await threadsParser!.parse(url);
+        }
         break;
       case 'article':
-        // TODO: Implement Article parser
-        break;
       case 'web':
-        // TODO: Implement generic web parser
+        if (webParser != null && webParser!.canParse(url)) {
+          return await webParser!.parseToContent(url);
+        }
         break;
     }
     

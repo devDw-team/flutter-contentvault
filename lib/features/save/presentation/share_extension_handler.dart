@@ -12,12 +12,19 @@ import '../../save/domain/services/url_validator.dart';
 import '../../save/domain/services/platform_parser_selector.dart';
 import '../../save/domain/services/pending_saves_repository.dart';
 import '../../save/domain/models/pending_save_model.dart';
+import '../../save/domain/services/background_save_processor.dart';
+import '../../save/data/parsers/youtube_parser.dart';
+import '../../save/data/parsers/twitter_parser.dart';
+import '../../save/data/parsers/web_parser.dart';
+import '../../save/data/api_clients/youtube_api_client.dart';
+import '../../save/domain/services/content_metadata_extractor.dart';
 
 class ShareExtensionHandler {
   final AppDatabase _database;
   final UrlValidator _urlValidator;
   final PlatformParserSelector _platformSelector;
   final PendingSavesRepository _pendingSavesRepository;
+  final BackgroundSaveProcessor _backgroundQueueProcessor;
   final _uuid = const Uuid();
   
   StreamSubscription? _mediaStreamSubscription;
@@ -27,10 +34,12 @@ class ShareExtensionHandler {
     required UrlValidator urlValidator,
     required PlatformParserSelector platformSelector,
     required PendingSavesRepository pendingSavesRepository,
+    required BackgroundSaveProcessor backgroundQueueProcessor,
   })  : _database = database,
         _urlValidator = urlValidator,
         _platformSelector = platformSelector,
-        _pendingSavesRepository = pendingSavesRepository;
+        _pendingSavesRepository = pendingSavesRepository,
+        _backgroundQueueProcessor = backgroundQueueProcessor;
 
   void initialize() {
     // Handle media sharing (text and images)
@@ -40,10 +49,10 @@ class ShareExtensionHandler {
         });
     
     // Handle initial shared data on app launch
-    _handleInitialSharedData();
+    processInitialSharedData();
   }
 
-  Future<void> _handleInitialSharedData() async {
+  Future<void> processInitialSharedData() async {
     try {
       debugPrint('ShareExtensionHandler: Checking for initial shared data...');
       
@@ -59,13 +68,45 @@ class ShareExtensionHandler {
           
           for (var item in sharedData) {
             if (item is Map) {
-              final path = item['path'] as String?;
+              debugPrint('ShareExtensionHandler: Raw item data: $item');
+              
+              // Safely extract path with flexible type handling
+              dynamic pathValue = item['path'];
+              String? path;
+              
+              if (pathValue is String) {
+                path = pathValue;
+              } else if (pathValue is int) {
+                // Handle case where path might be an integer (possibly an error code)
+                debugPrint('ShareExtensionHandler: Path is int: $pathValue');
+                continue; // Skip this item
+              } else if (pathValue != null) {
+                path = pathValue.toString();
+              }
+              
+              // Safely extract type
+              dynamic typeValue = item['type'];
+              String? type;
+              
+              if (typeValue is String) {
+                type = typeValue;
+              } else if (typeValue != null) {
+                type = typeValue.toString();
+              }
+              
               if (path != null && path.isNotEmpty) {
-                debugPrint('ShareExtensionHandler: Processing native item: $path');
+                debugPrint('ShareExtensionHandler: Processing native item: $path (type: $type)');
                 try {
-                  await _processSave(url: path);
+                  // Special handling for Threads URLs from native share
+                  String processedUrl = path.trim();
+                  if (processedUrl.contains('threads.net') && !processedUrl.startsWith('http')) {
+                    processedUrl = 'https://$processedUrl';
+                    debugPrint('ShareExtensionHandler: Fixed native Threads URL to: $processedUrl');
+                  }
+                  
+                  await _processSave(url: processedUrl);
                   successfullyProcessed.add(Map<String, dynamic>.from(item));
-                  debugPrint('ShareExtensionHandler: Successfully processed: $path');
+                  debugPrint('ShareExtensionHandler: Successfully processed: $processedUrl');
                 } catch (e) {
                   debugPrint('ShareExtensionHandler: Failed to process $path: $e');
                   // Continue processing other items
@@ -124,19 +165,44 @@ class ShareExtensionHandler {
     debugPrint('ShareExtensionHandler: Received ${sharedFiles.length} shared items');
     
     for (final file in sharedFiles) {
-      debugPrint('ShareExtensionHandler: Processing file - type: ${file.type}, path: ${file.path}');
-      
-      // For text/URL sharing, the path contains the shared text
-      if (file.path != null) {
-        final String path = file.path;
-        final urls = _extractUrls(path);
-        debugPrint('ShareExtensionHandler: Extracted URLs: $urls');
+      try {
+        debugPrint('ShareExtensionHandler: Processing file - type: ${file.type}, path: ${file.path}');
         
-        if (urls.isNotEmpty) {
-          await _processSave(url: urls.first, text: path);
-        } else {
-          debugPrint('ShareExtensionHandler: No valid URLs found in: $path');
+        // For text/URL sharing, the path contains the shared text
+        if (file.path != null && file.path.isNotEmpty) {
+          final String path = file.path;
+          
+          // Special handling for Threads app sharing
+          if (path.contains('threads.net')) {
+            debugPrint('ShareExtensionHandler: Detected Threads share: $path');
+            
+            // Sometimes Threads app shares without protocol
+            String processedUrl = path.trim();
+            if (!processedUrl.startsWith('http')) {
+              // Extract the threads.net URL part
+              final threadsMatch = RegExp(r'(threads\.net[\w/.-]+)').firstMatch(processedUrl);
+              if (threadsMatch != null) {
+                processedUrl = 'https://${threadsMatch.group(1)}';
+                debugPrint('ShareExtensionHandler: Processed Threads URL: $processedUrl');
+              }
+            }
+            
+            await _processSave(url: processedUrl, text: path);
+          } else {
+            // Standard URL extraction for other platforms
+            final urls = _extractUrls(path);
+            debugPrint('ShareExtensionHandler: Extracted URLs: $urls');
+            
+            if (urls.isNotEmpty) {
+              await _processSave(url: urls.first, text: path);
+            } else {
+              debugPrint('ShareExtensionHandler: No valid URLs found in: $path');
+            }
+          }
         }
+      } catch (e) {
+        debugPrint('ShareExtensionHandler: Error processing shared file: $e');
+        // Continue with next file
       }
     }
   }
@@ -167,6 +233,15 @@ class ShareExtensionHandler {
   }) async {
     try {
       debugPrint('ShareExtensionHandler: Processing save for URL: $url');
+      
+      // Clean and normalize URL
+      url = url.trim();
+      
+      // Handle Threads app specific URL format
+      if (url.contains('threads.net') && !url.startsWith('http')) {
+        url = 'https://$url';
+        debugPrint('ShareExtensionHandler: Fixed Threads URL to: $url');
+      }
       
       // Validate URL
       if (!_urlValidator.isValid(url)) {
@@ -242,9 +317,14 @@ class ShareExtensionHandler {
   }
 
   Future<void> _triggerBackgroundProcessing(String pendingSaveId) async {
-    // This will be handled by the background queue processor
-    // For now, we'll just mark it as ready for processing
-    debugPrint('Pending save created with ID: $pendingSaveId');
+    debugPrint('ShareExtensionHandler: Triggering background processing for: $pendingSaveId');
+    
+    // Process the pending save immediately
+    try {
+      await _backgroundQueueProcessor.processImmediately(pendingSaveId);
+    } catch (e) {
+      debugPrint('ShareExtensionHandler: Error in background processing: $e');
+    }
   }
 
   void dispose() {
@@ -254,13 +334,6 @@ class ShareExtensionHandler {
 
 // Provider for ShareExtensionHandler
 final shareExtensionHandlerProvider = Provider<ShareExtensionHandler>((ref) {
-  final database = GetIt.instance<AppDatabase>();
-  final pendingSavesRepository = GetIt.instance<PendingSavesRepository>();
-  
-  return ShareExtensionHandler(
-    database: database,
-    urlValidator: UrlValidator(),
-    platformSelector: PlatformParserSelector(),
-    pendingSavesRepository: pendingSavesRepository,
-  );
+  // Get from service locator since it's already registered there
+  return GetIt.instance<ShareExtensionHandler>();
 });

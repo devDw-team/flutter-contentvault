@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -289,6 +290,15 @@ class _AboutSection extends StatelessWidget {
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
             // TODO: 앱 정보 페이지로 이동
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.bug_report),
+          title: const Text('디버그 정보'),
+          subtitle: const Text('Share Extension 상태 확인'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            context.push('/debug');
           },
         ),
         ListTile(

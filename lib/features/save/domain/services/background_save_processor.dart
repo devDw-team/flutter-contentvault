@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart';
@@ -32,7 +33,7 @@ class BackgroundSaveProcessor {
     _processingTimer?.cancel();
     _processingTimer = Timer.periodic(
       const Duration(seconds: 5),
-      (_) => _processQueue(),
+      (_) => processQueue(),
     );
   }
 
@@ -41,7 +42,7 @@ class BackgroundSaveProcessor {
     _processingTimer = null;
   }
 
-  Future<void> _processQueue() async {
+  Future<void> processQueue() async {
     if (_isProcessing) return;
     
     _isProcessing = true;
@@ -61,37 +62,77 @@ class BackgroundSaveProcessor {
 
   Future<void> _processSingleSave(PendingSaveModel pendingSave) async {
     try {
+      debugPrint('BackgroundSaveProcessor: Processing save for URL: ${pendingSave.url}');
+      
       // Update status to processing
       await _pendingSavesRepository.update(
         pendingSave.id,
         pendingSave.copyWith(status: 'processing'),
       );
 
-      // Extract metadata based on platform
-      final metadata = await _metadataExtractor.extractMetadata(
-        url: pendingSave.url,
-        platform: pendingSave.sourcePlatform,
-      );
+      // Ensure URL is properly formatted
+      String processedUrl = pendingSave.url.trim();
+      
+      // Special handling for Threads URLs
+      if (processedUrl.contains('threads.net') && !processedUrl.startsWith('http')) {
+        processedUrl = 'https://$processedUrl';
+        debugPrint('BackgroundSaveProcessor: Fixed Threads URL to: $processedUrl');
+      }
 
-      // Create content entry
-      final contentId = _uuid.v4();
-      await _database.into(_database.contentsTable).insert(
-        ContentsTableCompanion.insert(
-          id: contentId,
-          title: metadata.title ?? pendingSave.title ?? 'Untitled',
-          url: pendingSave.url,
-          description: Value(metadata.description),
-          thumbnailUrl: Value(metadata.thumbnailUrl),
-          contentType: _mapPlatformToContentType(pendingSave.sourcePlatform),
-          sourcePlatform: pendingSave.sourcePlatform,
-          author: Value(metadata.author),
-          publishedAt: Value(metadata.publishedAt),
-          contentText: Value(metadata.contentText ?? pendingSave.text),
-          metadata: Value(metadata.toJson()),
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      );
+      // Parse content using appropriate parser
+      final content = await _platformSelector.parseContent(processedUrl);
+      
+      if (content == null) {
+        // Fallback to metadata extractor if parser is not available
+        final metadata = await _metadataExtractor.extractMetadata(
+          url: processedUrl,
+          platform: pendingSave.sourcePlatform,
+        );
+
+        // Create content entry from metadata
+        final contentId = _uuid.v4();
+        await _database.into(_database.contentsTable).insert(
+          ContentsTableCompanion.insert(
+            id: contentId,
+            title: metadata.title ?? pendingSave.title ?? 'Untitled',
+            url: processedUrl,
+            description: Value(metadata.description),
+            thumbnailUrl: Value(metadata.thumbnailUrl),
+            contentType: _mapPlatformToContentType(pendingSave.sourcePlatform),
+            sourcePlatform: pendingSave.sourcePlatform,
+            author: Value(metadata.author),
+            publishedAt: Value(metadata.publishedAt),
+            contentText: Value(metadata.contentText ?? pendingSave.text),
+            metadata: Value(metadata.toJson()),
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
+        );
+      } else {
+        // Save parsed content directly
+        await _database.into(_database.contentsTable).insert(
+          ContentsTableCompanion.insert(
+            id: content.id,
+            title: content.title,
+            url: content.url,
+            description: Value(content.description),
+            thumbnailUrl: Value(content.thumbnailUrl),
+            contentType: content.contentType,
+            sourcePlatform: content.sourcePlatform,
+            author: Value(content.author),
+            publishedAt: Value(content.publishedAt),
+            contentText: Value(content.contentText),
+            metadata: Value(content.metadata),
+            createdAt: content.createdAt,
+            updatedAt: content.updatedAt,
+          ),
+        );
+        
+        // If it's an article, save additional content
+        if (content.contentType == 'article' && content.metadata != null) {
+          await _saveArticleContent(content);
+        }
+      }
 
       // Update pending save as completed
       await _pendingSavesRepository.update(
@@ -106,6 +147,9 @@ class BackgroundSaveProcessor {
       await _cleanupOldSaves();
       
     } catch (e) {
+      debugPrint('BackgroundSaveProcessor: Error processing save: $e');
+      debugPrint('BackgroundSaveProcessor: Stack trace: ${StackTrace.current}');
+      
       // Update with error
       await _pendingSavesRepository.update(
         pendingSave.id,
@@ -145,6 +189,31 @@ class BackgroundSaveProcessor {
   Future<void> _cleanupOldSaves() async {
     final cutoffDate = DateTime.now().subtract(const Duration(days: 7));
     await _pendingSavesRepository.cleanupOldCompleted(cutoffDate);
+  }
+
+  Future<void> _saveArticleContent(Content content) async {
+    try {
+      final metadata = content.metadata;
+      if (metadata == null) return;
+      
+      final metadataMap = jsonDecode(metadata) as Map<String, dynamic>;
+      
+      await _database.into(_database.articleContentTable).insert(
+        ArticleContentTableCompanion.insert(
+          id: metadataMap['articleId'] ?? content.id,
+          contentId: content.id,
+          contentHtml: metadataMap['contentHtml'] ?? '',
+          contentText: content.contentText ?? '',
+          images: jsonEncode(metadataMap['images'] ?? []),
+          readingTimeMinutes: metadataMap['readingTimeMinutes'] ?? 0,
+          metadata: Value(content.metadata),
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      );
+    } catch (e) {
+      debugPrint('BackgroundSaveProcessor: Error saving article content: $e');
+    }
   }
 
   Future<void> processImmediately(String pendingSaveId) async {
