@@ -4,6 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:html/parser.dart' show parse;
 import '../../providers/search_provider.dart';
 import '../../domain/models/search_query_model.dart';
+import '../../providers/filter_provider.dart';
+import '../../models/filter_state.dart';
+import '../../models/filter_options.dart';
+import '../filter_sheet.dart';
 
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({super.key});
@@ -122,7 +126,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 }
 
-class _SearchInputSection extends StatelessWidget {
+class _SearchInputSection extends ConsumerWidget {
   const _SearchInputSection({
     required this.controller,
     required this.focusNode,
@@ -140,39 +144,68 @@ class _SearchInputSection extends StatelessWidget {
   final List<String> suggestions;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final filterState = ref.watch(currentFilterStateProvider);
+    final filterOptions = ref.watch(currentFilterOptionsProvider);
+    final activeFilterCount = filterState?.activeFilterCount ?? 0;
+
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.all(16.0),
-          child: TextField(
-            controller: controller,
-            focusNode: focusNode,
-            decoration: InputDecoration(
-              hintText: '제목, 내용, 작성자로 검색...',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: isLoading
-                  ? const Padding(
-                      padding: EdgeInsets.all(12.0),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : controller.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: onClear,
-                        )
-                      : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  decoration: InputDecoration(
+                    hintText: '제목, 내용, 작성자로 검색...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: isLoading
+                        ? const Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : controller.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: onClear,
+                              )
+                            : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                  ),
+                  onChanged: onChanged,
+                  textInputAction: TextInputAction.search,
+                ),
               ),
-              filled: true,
-            ),
-            onChanged: onChanged,
-            textInputAction: TextInputAction.search,
+              const SizedBox(width: 8),
+              IconButton.filled(
+                icon: Badge(
+                  isLabelVisible: activeFilterCount > 0,
+                  label: Text('$activeFilterCount'),
+                  child: const Icon(Icons.filter_list),
+                ),
+                onPressed: () async {
+                  final result = await FilterBottomSheet.show(
+                    context,
+                    initialState: filterState ?? const FilterState(),
+                    options: filterOptions ?? const FilterOptions(),
+                  );
+                  if (result != null) {
+                    // Apply filters to search
+                    ref.read(searchNotifierProvider.notifier).applyFilters(result);
+                  }
+                },
+              ),
+            ],
           ),
         ),
         if (suggestions.isNotEmpty && focusNode.hasFocus)

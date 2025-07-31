@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get_it/get_it.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/di/service_locator.dart';
 import 'core/router/app_router.dart';
@@ -10,6 +12,9 @@ import 'features/save/domain/services/background_save_processor.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 한국어 날짜 형식 초기화
+  await initializeDateFormatting('ko_KR', null);
   
   // 의존성 주입 초기화
   await setupServiceLocator();
@@ -46,6 +51,16 @@ class ContentVaultApp extends ConsumerWidget {
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
       routerConfig: router,
+      locale: const Locale('ko', 'KR'),
+      supportedLocales: const [
+        Locale('ko', 'KR'),
+        Locale('en', 'US'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
     );
   }
 } 

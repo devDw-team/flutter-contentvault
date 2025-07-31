@@ -5,6 +5,7 @@ import 'package:get_it/get_it.dart';
 import '../../../core/database/app_database.dart';
 import '../domain/services/search_engine.dart';
 import '../domain/models/search_query_model.dart';
+import '../models/filter_state.dart';
 
 part 'search_provider.freezed.dart';
 part 'search_provider.g.dart';
@@ -174,6 +175,27 @@ class SearchNotifier extends _$SearchNotifier {
       // Clear results if no query
       state = state.copyWith(results: null);
     }
+  }
+
+  void applyFilters(FilterState filterState) {
+    state = state.copyWith(
+      selectedPlatforms: filterState.contentTypes,
+      selectedTags: filterState.tags,
+    );
+    
+    // Update search query with all filter options
+    final updatedQuery = state.currentQuery.copyWith(
+      platforms: filterState.contentTypes,
+      tags: filterState.tags,
+      startDate: filterState.startDate,
+      endDate: filterState.endDate,
+      sortBy: filterState.sortBy.value + (filterState.isAscending ? '_asc' : '_desc'),
+    );
+    
+    state = state.copyWith(currentQuery: updatedQuery);
+    
+    // Re-run search with new filters
+    search(state.currentQuery.query);
   }
 
   Future<List<String>> getSuggestions(String partialQuery) async {
